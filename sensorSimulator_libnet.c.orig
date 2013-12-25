@@ -1,0 +1,45 @@
+#include <libnet.h>
+#include <sys/types.h>
+
+int main()
+{
+	char device[] = "wlan0";
+	u_int32_t srcip, desip;
+	u_char srcmac[6] = {0x11,0x11,0x11,0x11,0x11,0x11};
+	u_char desmac[6] = {0x22,0x22,0x22,0x22,0x22,0x22};
+	libnet_t *plibnet_app;
+	char errbuf[100];
+	plibnet_app=libnet_init(LIBNET_LINK_ADV, device, errbuf);
+	srcip=inet_addr("192.168.1.9");
+	desip=inet_addr("192.168.1.3");
+
+	libnet_build_arp(ARPHRD_ETHER,//hardware addr 
+                ETHERTYPE_IP,//protocol addr 
+                6,//hardware addr size 
+                4,//protocol addr size
+                ARPOP_REPLY,//operation type 
+                (u_int8_t*)&srcmac,//sender hardware addr (u_int8_t point) 
+                (u_int8_t*)&srcip,//sender protocol addr(u_int8_t point) 
+                (u_int8_t*)&desmac,//target hardware addr(u_int8_t point) 
+                (u_int8_t*)&desip,//target protocol addr(u_int8_t point) 
+                NULL,//payload 
+                0,//payloadz 
+                plibnet_app,//libnet handle 
+                0/*libnet id*/);
+	libnet_build_ethernet(desmac,//des HW addr* 
+                srcmac,//src HW addr* 
+                0x0806,//ether packet type 
+                NULL,//prt to oad 
+                0,//payload size 
+                plibnet_app,//libnet handle 
+                0);//ptr toi packet memory
+	for(;;) {     
+            //libnet_adv_cull_packet(plibnet_app, &packet, &packet_size); 
+            libnet_write(plibnet_app); 
+            printf("Send ARP Packet\n"); 
+            sleep(1);
+	}
+	libnet_destroy(plibnet_app); 
+	return 0;
+}
+
