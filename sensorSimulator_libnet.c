@@ -199,7 +199,7 @@ u_int8_t* mac_addr_aton(char* p, u_int8_t* buf)
 	int i = 0;
 	char *t = strtok(p, ":");
 	while(i<MAC_ADDRESS_LENGTH && t != NULL) {
-		buf[i++] = (u_int8_t)((t[0]-0x30)*16+(t[1]-0x30)); 		
+		buf[i++] = (u_int8_t)((t[0]-(isalpha(t[0])?(islower(t[0])?0x61-0xa:0x41-0xA):0x30))*16+(t[1]-(isalpha(t[1])?(islower(t[1])?0x61-0xa:0x41-0xA):0x30)));
 		t = strtok(NULL, ":");
 	}
 	return buf;
@@ -234,6 +234,7 @@ void* thread_routine(void* input)
 	char errbuf[LIBNET_ERRBUF_SIZE];
 	libnet_ptag_t udp_ptag, ip_ptag, eth_ptag, t;
 	int i = 0;
+	int val = 0;
 	u_int16_t sport = (u_int16_t)0x1234;
 	u_int16_t dport = (u_int16_t)0x5678;
 
@@ -301,7 +302,7 @@ void* thread_routine(void* input)
 			libnet_destroy(plibnet_app);
 			pthread_exit(NULL);
 		}
-		libnet_write(plibnet_app); 
+		val = libnet_write(plibnet_app); 
 		if(p->interval > 0) {
 			thread_sleep(p->interval);
 		}
