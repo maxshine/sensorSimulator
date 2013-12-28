@@ -219,7 +219,12 @@ void thread_sleep (int timeout)
 	gettimeofday(&tv, NULL);
 	tsp.tv_sec = tv.tv_sec;
 	tsp.tv_nsec = tv.tv_usec*1000;
-	tsp.tv_sec += (time_t)timeout;
+	tsp.tv_sec += (time_t)(timeout/1000);
+	tsp.tv_nsec += (time_t)(timeout%1000*1000*1000);
+	if(tsp.tv_nsec >= 1000000000) {
+		tsp.tv_sec += 1;
+		tsp.tv_nsec -= 1000000000;
+	}
 	pthread_cond_timedwait(&cond, &mutex, &tsp);
 	pthread_mutex_unlock(&mutex);
 
@@ -303,6 +308,11 @@ void* thread_routine(void* input)
 			pthread_exit(NULL);
 		}
 		val = libnet_write(plibnet_app); 
+/*		if(p->interval > 0 && p->interval % 1000 == 0) {
+			thread_sleep(p->interval);
+		} else if(p->interval > 0) {
+			usleep(p->interval*1000);
+		}*/
 		if(p->interval > 0) {
 			thread_sleep(p->interval);
 		}
