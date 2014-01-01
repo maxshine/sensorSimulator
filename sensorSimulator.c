@@ -41,6 +41,10 @@
 #define TRACE 5
 #define DEFAULT_LOG_LEVEL 10
 
+#define ERROR_USER 1
+#define ERROR_CONFIG 2
+#define ERROR_HARDWARE 3
+
 typedef int LogLevel;
 
 typedef enum BOOL {
@@ -488,47 +492,118 @@ struct config* load_config(const char* config_file) {
 	return pointer_config;
 }
 
-int getInterfaceStatus(char *intrface) {
-//	char *cmd = "iwconfig wlan2 | grep -oP 'Access Point: \K((\w+-\w+)|(\w{2}:){5}(\w){2})'";
-//	FILE* fs = popen("", "r");
-//
-//	fclose(fs);
-	return 0;
+void freeConfig(struct config *p_config) {
+	if (p_config->device != NULL)
+		free(p_config->device);
+	if (p_config->mac_data_file != NULL)
+		free(p_config->mac_data_file);
+	if (p_config->logfile != NULL)
+		free(p_config->logfile);
+}
+
+/*
+ * use access point ti identify whether interface is on work. 0 represents OK, other values mean not
+ */
+int getInterfaceStatus(char *interface) {
+	char cmd[FILE_LINE_BUFFER_SIZE];
+	/*sprintf(cmd, "iwconfig %s | grep -oP 'Access Point: \\K((\\w+-\\w+)|(\\w{2}:){5}(\\w){2})'", interface);*/
+
+	/* To support most system, use basic RE in grep */
+	sprintf(cmd, "iwconfig %s | grep -o 'Access Point:[[:space:]]\\+\\([-:[:alnum:]]\\+\\)' | awk 'END{print $3}'", interface);
+	FILE* fs = popen(cmd, "r");
+	char str[FILE_LINE_BUFFER_SIZE];
+	int result = 0;
+	if (fgets(str, FILE_LINE_BUFFER_SIZE, fs) != NULL) {
+		if (strcmp("Not-Associated\n", str) == 0) {
+		/* wlan interface is not associated with any AP */
+			result = 1;
+		}
+	} else {
+		/* wlan interface is down*/
+		result = 2;
+	}
+
+	fclose(fs);
+	return result;
+}
+
+/*
+ * use iwconig set txpower for interface
+ */
+int setTxPower(char* interface, int nmW){
+	char cmd[FILE_LINE_BUFFER_SIZE];
+	int ret_code = 1;
+	sprintf(cmd, "iwconfig %s txpower %dmW", interface, nmW);
+	ret_code = system(cmd);
+	return ret_code;
+}
+
+void freeMacLinkedList(MacLinkedList list) {
+	MacLinkedList p, q;
+	p = list;
+	while (p != NULL) {
+		if (p->data != NULL) {
+			free(p->data);
+		}
+		q = p;
+		p = p->next;
+		free(q);
+	}
+}
+
+void freeThreadInput(struct thread_input* input){
+	if(input->device != NULL)
+		free(input->device);
+	if(input->payload != NULL)
+		free(input->payload);
+	if(input->srcmac != NULL)
+		freeMacLinkedList(input->srcmac);
 }
 
 int main(int argc, char* argv[]) {
-	//check sudo previlege
 
 	int c;
 	int srcmac_cnt;
 	int i = 0;
-
 	struct config* pointer_config = NULL;
+
+	/* check sudo previlege */
+	if(geteuid() != getpwnam("root")->pw_uid) {
+		return ERROR_USER;
+	}
+
 	while ((c = getopt(argc, argv, "c:")) != -1) {
 		if (c == 'c') {
 			pointer_config = load_config(optarg);
 			if (pointer_config == NULL) {
-				return 1;
+				return ERROR_CONFIG;
 			}
 		}
 	}
+
+	/* check wireless interface work */
+	if (getInterfaceStatus(pointer_config->device) != 0) {
+//		return ERROR_HARDWARE;
+	}
+
+	/* set wireless interface tx power */
+	if (setTxPower(pointer_config->device, pointer_config->power) != 0) {
+		return ERROR_HARDWARE;
+	}
+
 	int threadCount = pointer_config->threads;
 	MacLinkedList head = loadMacFile(pointer_config->mac_data_file, &srcmac_cnt);
-	int mac_qty_thread = srcmac_cnt/threadCount;
+	int srcmac_qty_thread = srcmac_cnt/threadCount;
 	u_int8_t *payload = malloc(pointer_config->size*sizeof(u_int8_t));
 	for(i=0; i<pointer_config->size; i++) {
 		payload[i] = 0x41+i%26;
 	}
 
-	//check wireless interface work
-	if (getInterfaceStatus(pointer_config->device) != 0) {
-		perror("interface doesn't work");
-		return 1;
-	}
 	struct thread_input *input = malloc(threadCount*sizeof(struct thread_input));
 	pthread_t *tid = malloc(threadCount * sizeof(pthread_t));
 	for (i = 0; i < threadCount; i++) {
-		(input+i)->device = pointer_config->device;
+		(input+i)->device = malloc((1+strlen(pointer_config->device))*sizeof(char));
+		memcpy((input+i)->device, pointer_config->device, (1+strlen(pointer_config->device))*sizeof(char));
 		(input+i)->interval = pointer_config->interval;
 		(input+i)->count = pointer_config->count;
 		(input+i)->size = pointer_config->size;
@@ -536,29 +611,32 @@ int main(int argc, char* argv[]) {
 		(input+i)->dstip = pointer_config->dstip;
 		memcpy((input+i)->dstmac, pointer_config->dstmac, MAC_ADDRESS_LENGTH*sizeof(u_int8_t));
 		(input+i)->payload = (u_int8_t*) malloc(pointer_config->size*sizeof(u_int8_t));
-		memcpy((input+i)->payload, payload, pointer_config->size);
+		memcpy((input+i)->payload, payload, pointer_config->size*sizeof(u_int8_t));
 		if(i+1 == threadCount) {
-			(input+i)->srcmac = submaclist(&head, 2*mac_qty_thread);
+			(input+i)->srcmac = submaclist(&head, 2*srcmac_qty_thread); /* get all of the remains */
 		} else {
-			(input+i)->srcmac = submaclist(&head, mac_qty_thread);
+			(input+i)->srcmac = submaclist(&head, srcmac_qty_thread);
 		}
 	
 		pthread_create(&tid[i], NULL, thread_routine, (void*)(input+i));
 	}
 
-/*	for (i = 0; i < threadCount; i++) {
+	/* Wait all worker thread to complete tasks */
+	for (i = 0; i < threadCount; i++) {
 		pthread_join(tid[i], NULL);
 	}
-*/
 
-	//free memory
-/*	for (i = 0; i < threadCount; i++) {
-		pthread_detach(tid[i]);
+	/* free thread input data memory block */
+	for (i = 0; i < threadCount; i++) {
+		freeThreadInput(input+i);
 	}
-*/
+	free(input);
+	free(tid);
 
-	//free input
-	thread_sleep(100000);
+	/* free config data */
+	freeConfig(pointer_config);
+	free(payload);
+
 	return 0;
 }
 
