@@ -44,6 +44,7 @@
 #define ERROR_USER 1
 #define ERROR_CONFIG 2
 #define ERROR_HARDWARE 3
+#define ERROR_MEMORY 4
 
 typedef int LogLevel;
 
@@ -52,7 +53,7 @@ typedef enum BOOL {
 } BOOL;
 
 typedef struct mac_node {
-	u_int8_t* data;
+	u_int8_t data[MAC_ADDRESS_LENGTH];
 	struct mac_node *next;
 } MacNode, *MacLinkedList;
 
@@ -91,7 +92,8 @@ struct thread_input {
 
 LogDescriptor global_log_descriptor;
 
-void do_debug_log(LogLevel level, const char* msg) {
+void do_debug_log(LogLevel level, const char* msg) 
+{
 	if (level >= global_log_descriptor.effective_level) {
 		pthread_mutex_lock(&global_log_descriptor.log_mutex);
 		fputs(msg, global_log_descriptor.log_file_handler);
@@ -100,26 +102,29 @@ void do_debug_log(LogLevel level, const char* msg) {
 	}
 }
 
-void debug_log(LogLevel level, const char* function_name, const char* msg) {
-	pid_t pid = getpid();
-	pthread_t tid = pthread_self();
-	time_t* t = (time_t*) malloc(sizeof(time_t));
-	char* timestamp = (char*) malloc(30 * sizeof(char));
-	char* message = (char*) malloc((30 + strlen(msg) + 100) * sizeof(char));
-	memset(timestamp, 0, 30 * sizeof(char));
-	memset(message, 0, (30 + strlen(msg) + 100) * sizeof(char));
-	time(t);
-	strftime(timestamp, 30, "[%F %T Z%z]", localtime(t));
-	sprintf(message, "%s %#x %lu %s %s\n", timestamp, pid, (unsigned long) tid,
+void debug_log(LogLevel level, const char* function_name, const char* msg) 
+{
+	if (level >= global_log_descriptor.effective_level) {
+		pid_t pid = getpid();
+		pthread_t tid = pthread_self();
+		time_t* t = (time_t*) malloc(sizeof(time_t));
+		char* timestamp = (char*) malloc(30 * sizeof(char));
+		char* message = (char*) malloc((30 + strlen(msg) + 100) * sizeof(char));
+		memset(timestamp, 0, 30 * sizeof(char));
+		memset(message, 0, (30 + strlen(msg) + 100) * sizeof(char));
+		time(t);
+		strftime(timestamp, 30, "[%F %T Z%z]", localtime(t));
+		sprintf(message, "%s %#x %lx %s %s\n", timestamp, pid, (unsigned long) tid,
 			function_name, msg);
-	do_debug_log(level, message);
-	free(t);
-	free(message);
-	free(timestamp);
+		do_debug_log(level, message);
+		free(t);
+		free(message);
+		free(timestamp);
+	}
 }
 
-BOOL init_debug_log(const char* file_name, const LogLevel effective_level) {
-	global_log_descriptor.effective_level = effective_level;
+BOOL init_debug_log(const char* file_name, const LogLevel effective_level) 
+{ global_log_descriptor.effective_level = effective_level;
 	global_log_descriptor.log_file_handler = NULL;
 	global_log_descriptor.log_file_handler = fopen(file_name, "a+");
 	if (global_log_descriptor.log_file_handler == NULL) {
@@ -129,7 +134,8 @@ BOOL init_debug_log(const char* file_name, const LogLevel effective_level) {
 	return TRUE;
 }
 
-BOOL deinit_debug_log(void) {
+BOOL deinit_debug_log(void) 
+{
 	if (global_log_descriptor.log_file_handler != NULL) {
 		fflush(global_log_descriptor.log_file_handler);
 		fclose(global_log_descriptor.log_file_handler);
@@ -179,12 +185,15 @@ int switch_config_name(const char* p) {
 	return 0;
 }
 
-int swtich_log_level(const char* p) {
+int switch_log_level(const char* p) {
 	if (strcmp(p, "INFO") == 0) {
 		return INFO;
 	}
 	if (strcmp(p, "TRACE") == 0) {
 		return TRACE;
+	}
+	if (strcmp(p, "SEVERE") == 0) {
+		return SEVERE;
 	}
 	if (strcmp(p, "OFF") == 0) {
 		return OFF;
@@ -250,9 +259,16 @@ void* thread_routine(void* input) {
 	int val = 0;
 	u_int16_t sport = (u_int16_t) 0x1234;
 	u_int16_t dport = (u_int16_t) 0x5678;
+	char log_buf[FILE_LINE_BUFFER_SIZE];
+	char *functionname = "thread_routine";
+
+	sprintf(log_buf, "INFO : Enter thread routine to send composed packets\n");
+	debug_log(INFO, functionname, log_buf);
 
 	plibnet_app = libnet_init(LIBNET_LINK_ADV, p->device, errbuf);
 	if (plibnet_app == NULL) {
+		sprintf(log_buf, "ERROR : Cannot initialize libnet context\n");
+		debug_log(SEVERE, functionname, log_buf);
 		pthread_exit(NULL);
 	}
 
@@ -265,6 +281,8 @@ void* thread_routine(void* input) {
 	plibnet_app, /*libnet context*/
 	0); /*create new UDP protocal tag*/
 	if (udp_ptag == -1) {
+                sprintf(log_buf, "ERROR : Cannot create libnet UDP ptag\n");
+                debug_log(SEVERE, functionname, log_buf);
 		libnet_destroy(plibnet_app);
 		pthread_exit(NULL);
 	}
@@ -284,6 +302,8 @@ void* thread_routine(void* input) {
 	plibnet_app, /*libnet context*/
 	0); /*create new IP protocal tag*/
 	if (ip_ptag == -1) {
+                sprintf(log_buf, "ERROR : Cannot create libnet IP ptag\n");
+                debug_log(SEVERE, functionname, log_buf);
 		libnet_destroy(plibnet_app);
 		pthread_exit(NULL);
 	}
@@ -296,6 +316,8 @@ void* thread_routine(void* input) {
 	plibnet_app, /*libnet handle*/
 	0); /*ptr to packet memory*/
 	if (eth_ptag == -1) {
+                sprintf(log_buf, "ERROR : Cannot create libnet ETHERNET ptag\n");
+                debug_log(SEVERE, functionname, log_buf);
 		libnet_destroy(plibnet_app);
 		pthread_exit(NULL);
 	}
@@ -311,13 +333,15 @@ void* thread_routine(void* input) {
 			plibnet_app, /*libnet handle*/
 			eth_ptag); /*ptr to packet memory*/
 			if (t == -1) {
+		                sprintf(log_buf, "ERROR : Cannot modify libnet ETHERNET ptag\n");
+               			debug_log(SEVERE, functionname, log_buf);
 				libnet_destroy(plibnet_app);
 				pthread_exit(NULL);
 			}
 			val = libnet_write(plibnet_app);
 			if (p->interval > 0) {
-				//thread_sleep(p->interval);
-				usleep(100*1000);	
+				thread_sleep(p->interval);
+//				usleep(100*1000);	
 			}
 			if(pmac->next == NULL) {
 				pmac = pmac_head;
@@ -326,6 +350,8 @@ void* thread_routine(void* input) {
 			}
 		}
 	}
+	sprintf(log_buf, "INFO : Done with thread routine, totally sent %d packets\n", i);
+	debug_log(INFO, functionname, log_buf);
 	libnet_destroy(plibnet_app);
 	return 0;
 }
@@ -346,11 +372,38 @@ MacLinkedList submaclist(MacLinkedList* head, int count)
 	}
 	r->next = NULL;
 	return p;
-}	
+}
+
+MacLinkedList copymaclist(MacLinkedList head)
+{
+	MacLinkedList p=NULL, q=NULL, r=NULL, pEntry=NULL;
+	int cnt = 0;
+	p = head;
+	while(p != NULL) {
+	        pEntry = (MacLinkedList) malloc(sizeof(MacNode));
+		if(pEntry == NULL) {
+			perror("Memory allocation failed : ");
+			exit(ERROR_MEMORY);
+		}
+	        pEntry->next = NULL;
+		memcpy(pEntry->data, p->data, MAC_ADDRESS_LENGTH*sizeof(u_int8_t)); 
+		if(q==NULL) {
+			q = pEntry;
+			r = q;
+		} else {
+			r->next = pEntry;
+			r = r->next;
+		}
+		p = p->next;
+		cnt++;
+	}
+	return q;
+}
+
 MacLinkedList loadMacFile(const char* mac_file, int* cnt) {
 	MacLinkedList list, p, r;
 	list = (MacLinkedList) malloc(sizeof(MacNode));
-	list->data = NULL;
+/*	list->data = NULL; */
 	list->next = NULL;
 	p = NULL;
 	r = list;
@@ -364,24 +417,26 @@ MacLinkedList loadMacFile(const char* mac_file, int* cnt) {
 		return NULL;
 	}
 	while (fgets(str, FILE_LINE_BUFFER_SIZE, fp) != NULL) {
-		u_int8_t* buf = malloc(MAC_ADDRESS_LENGTH * sizeof(u_int8_t));
+/*		u_int8_t* buf = malloc(MAC_ADDRESS_LENGTH * sizeof(u_int8_t)); 
 		if (buf == NULL) {
 			perror("");
 			fclose(fp);
 			return NULL;
 		}
-		if (list->data == NULL) {
-			list->data = mac_addr_aton(str, buf);
+*/
+		if (*cnt == 0) {
+			mac_addr_aton(str, list->data);
 		} else {
 			p = (MacLinkedList) malloc(sizeof(MacNode));
-			p->data = NULL;
+/*			p->data = NULL; */
 			p->next = NULL;
 			if (p == NULL) {
 				perror("");
 				fclose(fp);
 				return NULL;
 			}
-			p->data = mac_addr_aton(str, buf);
+/*			p->data = mac_addr_aton(str, buf); */
+			mac_addr_aton(str, p->data);
 			r->next = p;
 			r = p;
 		}
@@ -472,7 +527,7 @@ struct config* load_config(const char* config_file) {
 			config_flag |= CONFIG_LOGFILE;
 			break;
 		case CONFIG_LOGLEVEL:
-			pointer_config->loglevel = swtich_log_level(value);
+			pointer_config->loglevel = switch_log_level(value);
 			config_flag |= CONFIG_LOGLEVEL;
 			break;
 		default:
@@ -542,9 +597,9 @@ void freeMacLinkedList(MacLinkedList list) {
 	MacLinkedList p, q;
 	p = list;
 	while (p != NULL) {
-		if (p->data != NULL) {
+/*		if (p->data != NULL) {
 			free(p->data);
-		}
+		} */
 		q = p;
 		p = p->next;
 		free(q);
@@ -565,10 +620,13 @@ int main(int argc, char* argv[]) {
 	int c;
 	int srcmac_cnt;
 	int i = 0;
+	char log_buf[FILE_LINE_BUFFER_SIZE];
+	char *functionname = "main";
 	struct config* pointer_config = NULL;
 
 	/* check sudo previlege */
 	if(geteuid() != getpwnam("root")->pw_uid) {
+		puts("ERROR : I need root privilege to run, exiting...\n");
 		return ERROR_USER;
 	}
 
@@ -576,18 +634,37 @@ int main(int argc, char* argv[]) {
 		if (c == 'c') {
 			pointer_config = load_config(optarg);
 			if (pointer_config == NULL) {
+				printf("ERROR : Invalid configuration file - %s, exiting...\n", optarg);
 				return ERROR_CONFIG;
 			}
 		}
 	}
+	if(pointer_config == NULL) {
+		puts("ERROR : No configuration file in input parameter, please use -c <filename>, exiting...\n");
+		return ERROR_CONFIG;
+	}
+
+	if(!init_debug_log(pointer_config->logfile, pointer_config->loglevel)) {
+		printf("ERROR : Cannot initialize log file %s for debugging, exiting...\n", pointer_config->logfile);
+		return ERROR_CONFIG;
+	}
+
+        sprintf(log_buf, "INFO : Program is started \n");
+        debug_log(INFO, functionname, log_buf);
 
 	/* check wireless interface work */
 	if (getInterfaceStatus(pointer_config->device) != 0) {
-//		return ERROR_HARDWARE;
+		sprintf(log_buf, "ERROR : Interface %s is not associated with any AP, please check it, exiting...\n", pointer_config->device);
+		debug_log(SEVERE, functionname, log_buf);
+		puts(log_buf);
+		return ERROR_HARDWARE;
 	}
 
 	/* set wireless interface tx power */
 	if (setTxPower(pointer_config->device, pointer_config->power) != 0) {
+		sprintf(log_buf, "ERROR : Not able to manipulate the WiFi interface %s for new txPower, exiting...\n", pointer_config->device);
+		debug_log(SEVERE, functionname, log_buf);
+		puts(log_buf);
 		return ERROR_HARDWARE;
 	}
 
@@ -612,13 +689,15 @@ int main(int argc, char* argv[]) {
 		memcpy((input+i)->dstmac, pointer_config->dstmac, MAC_ADDRESS_LENGTH*sizeof(u_int8_t));
 		(input+i)->payload = (u_int8_t*) malloc(pointer_config->size*sizeof(u_int8_t));
 		memcpy((input+i)->payload, payload, pointer_config->size*sizeof(u_int8_t));
-		if(i+1 == threadCount) {
-			(input+i)->srcmac = submaclist(&head, 2*srcmac_qty_thread); /* get all of the remains */
+/*		if(i+1 == threadCount) {
+			(input+i)->srcmac = submaclist(&head, 2*srcmac_qty_thread); // get all of the remains 
 		} else {
 			(input+i)->srcmac = submaclist(&head, srcmac_qty_thread);
 		}
-	
+ */
+		(input+i)->srcmac = copymaclist(head);
 		pthread_create(&tid[i], NULL, thread_routine, (void*)(input+i));
+		thread_sleep(pointer_config->interval);
 	}
 
 	/* Wait all worker thread to complete tasks */
@@ -636,6 +715,11 @@ int main(int argc, char* argv[]) {
 	/* free config data */
 	freeConfig(pointer_config);
 	free(payload);
+
+        sprintf(log_buf, "INFO : Program is finished\n");
+        debug_log(INFO, functionname, log_buf);
+
+	deinit_debug_log();
 
 	return 0;
 }
