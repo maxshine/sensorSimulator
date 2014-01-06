@@ -120,8 +120,8 @@ int main(int argc, char* argv[])
 		j = bits_to_do;
 		k = i+1;
 		while(j>1) {
-			mac[MAC_ADDRESS_LENGTH-j] = k / switch_divider(j);
-			k = k % switch_divider(j);
+			mac[MAC_ADDRESS_LENGTH-j] = k / switch_divider(j-1);
+			k = k % switch_divider(j-1);
 			j--;
 		}
 		mac[MAC_ADDRESS_LENGTH-j] = k;

@@ -661,11 +661,13 @@ int main(int argc, char* argv[]) {
 	}
 
 	/* set wireless interface tx power */
-	if (setTxPower(pointer_config->device, pointer_config->power) != 0) {
-		sprintf(log_buf, "ERROR : Not able to manipulate the WiFi interface %s for new txPower, exiting...\n", pointer_config->device);
-		debug_log(SEVERE, functionname, log_buf);
-		puts(log_buf);
-		return ERROR_HARDWARE;
+	if (pointer_config->power != 0) {
+		if (setTxPower(pointer_config->device, pointer_config->power) != 0) {
+			sprintf(log_buf, "ERROR : Not able to manipulate the WiFi interface %s for new txPower, exiting...\n", pointer_config->device);
+			debug_log(SEVERE, functionname, log_buf);
+			puts(log_buf);
+			return ERROR_HARDWARE;
+		}
 	}
 
 	int threadCount = pointer_config->threads;
@@ -689,13 +691,15 @@ int main(int argc, char* argv[]) {
 		memcpy((input+i)->dstmac, pointer_config->dstmac, MAC_ADDRESS_LENGTH*sizeof(u_int8_t));
 		(input+i)->payload = (u_int8_t*) malloc(pointer_config->size*sizeof(u_int8_t));
 		memcpy((input+i)->payload, payload, pointer_config->size*sizeof(u_int8_t));
-/*		if(i+1 == threadCount) {
+		if(i+1 == threadCount) {
 			(input+i)->srcmac = submaclist(&head, 2*srcmac_qty_thread); // get all of the remains 
 		} else {
 			(input+i)->srcmac = submaclist(&head, srcmac_qty_thread);
 		}
- */
+ 
+/*
 		(input+i)->srcmac = copymaclist(head);
+*/
 		pthread_create(&tid[i], NULL, thread_routine, (void*)(input+i));
 		thread_sleep(pointer_config->interval);
 	}
