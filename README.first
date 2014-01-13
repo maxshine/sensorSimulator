@@ -16,7 +16,7 @@ To compile the source code of this tool, you need a Linux-based build and runtim
 
 For other distribution with different package management system, refer their manual to do this.
 
-The tool also make use of iw-based wireless tool to manipulate WiFi interface at low level. Please ensure it's installed correctly, and check it by command `iwconfig -a`, see if it could list all wireless interface in the box.
+The tool also make use of iw-based wireless tool to manipulate WiFi interface at low level. Please ensure it's installed correctly, and check it by command `iwconfig`, see if it could list all wireless interface in the box.
 
 Compile instructions:
 --------------------

@@ -1,3 +1,18 @@
+/*
+ *  macDataGenerator v1.0
+ *
+ *  Copyright 2013, 2014 by IBM
+ *  All rights reserved.
+ *
+ *  Copyright (c) 2013 - 2014 IBM Corp Ltd.
+ *  Author: Yang, Gao <ygaobj@cn.ibm.com>
+ *  All rights reserved.
+ *
+ * THIS SOFTWARE IS PROVIDED ``AS IS'' AND WITHOUT ANY EXPRESS OR IMPLIED
+ * WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE.
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>

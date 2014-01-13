@@ -1,18 +1,3 @@
-/*
- *  macTransmitter v1.0
- *
- *  Copyright 2013, 2014 by IBM
- *  All rights reserved.
- *
- *  Copyright (c) 2013 - 2014 IBM Corp Ltd.
- *  Author: Yang, Gao <ygaobj@cn.ibm.com>
- *  All rights reserved.
- *
- * THIS SOFTWARE IS PROVIDED ``AS IS'' AND WITHOUT ANY EXPRESS OR IMPLIED
- * WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED WARRANTIES OF
- * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE.
- */
-
 #include <libnet.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -269,7 +254,7 @@ void* thread_routine(void* input) {
 	MacLinkedList pmac_head = p->srcmac;
 	libnet_t *plibnet_app;
 	char errbuf[LIBNET_ERRBUF_SIZE];
-	libnet_ptag_t udp_ptag, ip_ptag, eth_ptag, t;
+	libnet_ptag_t udp_ptag, icmp_ptag, ip_ptag, eth_ptag, t;
 	int i = 0;
 	int val = 0;
 	u_int16_t sport = (u_int16_t) 0x1234;
@@ -280,35 +265,40 @@ void* thread_routine(void* input) {
 	sprintf(log_buf, "INFO : Enter thread routine to send composed packets\n");
 	debug_log(INFO, functionname, log_buf);
 
-	plibnet_app = libnet_init(LIBNET_LINK_ADV, p->device, errbuf);
+//	plibnet_app = libnet_init(LIBNET_LINK_ADV, p->device, errbuf);
+	plibnet_app = libnet_init(LIBNET_RAW4, p->device, errbuf);
 	if (plibnet_app == NULL) {
 		sprintf(log_buf, "ERROR : Cannot initialize libnet context\n");
 		debug_log(SEVERE, functionname, log_buf);
 		pthread_exit(NULL);
 	}
 
-	udp_ptag = libnet_build_udp(sport, /*source port*/
-	dport, /*destination port*/
-	LIBNET_UDP_H + p->size, /*Total size of UDP packet*/
-	0, /*libnet autofill checksum*/
-	p->payload, /*payload pointer*/
-	p->size, /*payload size*/
-	plibnet_app, /*libnet context*/
-	0); /*create new UDP protocal tag*/
-	if (udp_ptag == -1) {
-                sprintf(log_buf, "ERROR : Cannot create libnet UDP ptag\n");
+	icmp_ptag = libnet_build_icmpv4_echo(ICMP_ECHO, /* echo request type */
+		0, /* reuqest code zero for echo request */
+		0, /* ask libnet to fill in checksum */
+		0, /* id for icmp */
+		0, /* seq for icmp id */
+		p->payload, /* payload */
+		p->size, /* payload length */
+		plibnet_app, /* libnet context */
+		0); /* create new ICMP protocal tag */
+        if (icmp_ptag == -1) {
+                sprintf(log_buf, "ERROR : Cannot create libnet ICMP ptag\n");
                 debug_log(SEVERE, functionname, log_buf);
-		libnet_destroy(plibnet_app);
-		pthread_exit(NULL);
-	}
+		sprintf(log_buf, "%s\n", libnet_geterror(plibnet_app));
+                debug_log(SEVERE, functionname, log_buf);
+                libnet_destroy(plibnet_app);
+                pthread_exit(NULL);
+        }
+
 
 	ip_ptag = libnet_build_ipv4(
 	LIBNET_IPV4_H + LIBNET_UDP_H + p->size, /*Total length of IP packet*/
 	0, /*TOS*/
-	242, /*IP ID*/
+	0x42, /*IP ID*/
 	0, /*IP Fragment*/
 	64, /*IP TTL*/
-	IPPROTO_UDP, /*IP Protocal*/
+	IPPROTO_ICMP, /*IP Protocal*/
 	0, /*libnet autofill checksum*/
 	p->srcip, /*Source IP address*/
 	p->dstip, /*Destination IP address*/
@@ -323,47 +313,48 @@ void* thread_routine(void* input) {
 		pthread_exit(NULL);
 	}
 
-	eth_ptag = libnet_build_ethernet(p->dstmac, /*des HW addr*/
-	(p->srcmac)->data, /*src HW addr*/
-	ETHERTYPE_IP, /*ether packet type*/
-	NULL, /*prt to payload*/
-	0, /*payload size*/
-	plibnet_app, /*libnet handle*/
-	0); /*ptr to packet memory*/
+/*	eth_ptag = libnet_build_ethernet(p->dstmac,
+	(p->srcmac)->data,
+	ETHERTYPE_IP,
+	NULL,
+	0,
+	plibnet_app,
+	0);
 	if (eth_ptag == -1) {
                 sprintf(log_buf, "ERROR : Cannot create libnet ETHERNET ptag\n");
                 debug_log(SEVERE, functionname, log_buf);
 		libnet_destroy(plibnet_app);
 		pthread_exit(NULL);
 	}
+*/
 
 	for (i = 0; i < p->count; i++) {
 		//libnet_adv_cull_packet(plibnet_app, &packet, &packet_size);
-		if (pmac->data != NULL) {
-			t = libnet_build_ethernet(p->dstmac, /*des HW addr*/
-			pmac->data, /*src HW addr*/
-			ETHERTYPE_IP, /*ether packet type*/
-			NULL, /*prt to payload*/
-			0, /*payload size*/
-			plibnet_app, /*libnet handle*/
-			eth_ptag); /*ptr to packet memory*/
+/*		if (pmac->data != NULL) {
+			t = libnet_build_ethernet(p->dstmac,
+			pmac->data,
+			ETHERTYPE_IP,
+			NULL,
+			0,
+			plibnet_app,
+			eth_ptag);
 			if (t == -1) {
 		                sprintf(log_buf, "ERROR : Cannot modify libnet ETHERNET ptag\n");
                			debug_log(SEVERE, functionname, log_buf);
 				libnet_destroy(plibnet_app);
 				pthread_exit(NULL);
 			}
+*/
 			val = libnet_write(plibnet_app);
 			if (p->interval > 0) {
 				thread_sleep(p->interval);
-//				usleep(100*1000);	
 			}
 			if(pmac->next == NULL) {
 				pmac = pmac_head;
 			} else {
 				pmac = pmac->next;
 			}
-		}
+	//	}
 	}
 	sprintf(log_buf, "INFO : Done with thread routine, totally sent %d packets\n", i);
 	debug_log(INFO, functionname, log_buf);
@@ -689,7 +680,7 @@ int main(int argc, char* argv[]) {
 	MacLinkedList head = loadMacFile(pointer_config->mac_data_file, &srcmac_cnt);
 	int srcmac_qty_thread = srcmac_cnt/threadCount;
 	u_int8_t *payload = NULL;
-	if(pointer_config->size > 0){
+	if(pointer_config->size > 0) {
 		u_int8_t *payload = malloc(pointer_config->size*sizeof(u_int8_t));
 		for(i=0; i<pointer_config->size; i++) {
 			payload[i] = 0x41+i%26;
@@ -703,16 +694,15 @@ int main(int argc, char* argv[]) {
 		memcpy((input+i)->device, pointer_config->device, (1+strlen(pointer_config->device))*sizeof(char));
 		(input+i)->interval = pointer_config->interval;
 		(input+i)->count = pointer_config->count;
+		(input+i)->size = pointer_config->size;
 		(input+i)->srcip = pointer_config->srcip;
 		(input+i)->dstip = pointer_config->dstip;
 		memcpy((input+i)->dstmac, pointer_config->dstmac, MAC_ADDRESS_LENGTH*sizeof(u_int8_t));
-		if(payload!=NULL && pointer_config->size>0) {
-			(input+i)->size = pointer_config->size;
+		if(pointer_config->size != 0) {
 			(input+i)->payload = (u_int8_t*) malloc(pointer_config->size*sizeof(u_int8_t));
 			memcpy((input+i)->payload, payload, pointer_config->size*sizeof(u_int8_t));
 		} else {
 			(input+i)->payload = NULL;
-			(input+i)->size = 0;
 		}
 		if(i+1 == threadCount) {
 			(input+i)->srcmac = submaclist(&head, 2*srcmac_qty_thread); // get all of the remains 
