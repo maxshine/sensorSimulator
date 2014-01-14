@@ -21,7 +21,7 @@
 
 #define FILE_LINE_BUFFER_SIZE 200
 #define MAC_ADDRESS_LENGTH 6
-#define CONFIG_THREADS  0x01
+#define CONFIG_IP_QTY_THREAD  0x01
 #define CONFIG_MACFILE  0x02
 #define CONFIG_SRCIP    0x04
 #define CONFIG_DSTIP    0x08
@@ -73,29 +73,26 @@ typedef struct log_descriptor {
 } LogDescriptor;
 
 struct config {
-	char* mac_data_file;
 	char* device;
 	char* logfile;
 	LogLevel loglevel;
 	int interval;
-	int threads;
-	int power;
+	int ip_qty_thread;
 	int size;
-	int count;
-	u_int32_t srcip;
-	u_int32_t dstip;
+	in_addr_t srcip;
+	in_addr_t dstip;
+	u_int8_t srcmac[MAC_ADDRESS_LENGTH];
 	u_int8_t dstmac[MAC_ADDRESS_LENGTH];
 };
 
 struct thread_input {
 	char* device;
 	int interval;
-	int count;
 	u_int8_t* payload;
 	u_int16_t size;
-	u_int32_t srcip;
-	u_int32_t dstip;
-	MacLinkedList srcmac;
+	in_addr_t srcip;
+	IPLinkedList dstip;
+	u_int8_t srcmac[MAC_ADDRESS_LENGTH];
 	u_int8_t dstmac[MAC_ADDRESS_LENGTH];
 };
 
@@ -155,8 +152,8 @@ BOOL deinit_debug_log(void)
 }
 
 int switch_config_name(const char* p) {
-	if (strcmp(p, "threads") == 0) {
-		return CONFIG_THREADS;
+	if (strcmp(p, "ip_qty_thread") == 0) {
+		return CONFIG_IP_QTY_THREAD;
 	}
 	if (strcmp(p, "macfile") == 0) {
 		return CONFIG_MACFILE;
@@ -259,15 +256,13 @@ void thread_sleep (int timeout)
 
 void* thread_routine(void* input) {
 	struct thread_input *p = input;
-	MacLinkedList pmac = p->srcmac;
-	MacLinkedList pmac_head = p->srcmac;
+	IPLinkedList pip = p->dstip;
+	IPLinkedList pip_head = p->dstip;
 	libnet_t *plibnet_app;
 	char errbuf[LIBNET_ERRBUF_SIZE];
 	libnet_ptag_t udp_ptag, icmp_ptag, ip_ptag, eth_ptag, t;
 	int i = 0;
 	int val = 0;
-	u_int16_t sport = (u_int16_t) 0x1234;
-	u_int16_t dport = (u_int16_t) 0x5678;
 	char log_buf[FILE_LINE_BUFFER_SIZE];
 	char *functionname = "thread_routine";
 
@@ -310,7 +305,7 @@ void* thread_routine(void* input) {
 	IPPROTO_ICMP, /*IP Protocal*/
 	0, /*libnet autofill checksum*/
 	p->srcip, /*Source IP address*/
-	p->dstip, /*Destination IP address*/
+	p->dstip->data, /*Destination IP address*/
 	NULL, /*Payload pointer*/
 	0, /*payload size*/
 	plibnet_app, /*libnet context*/
@@ -337,7 +332,7 @@ void* thread_routine(void* input) {
 	}
 */
 
-	for (i = 0; i < p->count; i++) {
+	while(pip != NULL) {
 		//libnet_adv_cull_packet(plibnet_app, &packet, &packet_size);
 /*		if (pmac->data != NULL) {
 			t = libnet_build_ethernet(p->dstmac,
@@ -353,22 +348,85 @@ void* thread_routine(void* input) {
 				libnet_destroy(plibnet_app);
 				pthread_exit(NULL);
 			}
-*/
-			val = libnet_write(plibnet_app);
-			if (p->interval > 0) {
-				thread_sleep(p->interval);
-			}
-			if(pmac->next == NULL) {
-				pmac = pmac_head;
-			} else {
-				pmac = pmac->next;
-			}
-	//	}
+*/		t = libnet_build_ipv4(
+		LIBNET_IPV4_H + LIBNET_UDP_H + p->size, /*Total length of IP packet*/
+			0, /*TOS*/
+			0x42, /*IP ID*/
+			0, /*IP Fragment*/
+			64, /*IP TTL*/
+			IPPROTO_ICMP, /*IP Protocal*/
+			0, /*libnet autofill checksum*/
+			p->srcip, /*Source IP address*/
+			pip->data, /*Destination IP address*/
+			NULL, /*Payload pointer*/
+			0, /*payload size*/
+			plibnet_app, /*libnet context*/
+			0); /*create new IP protocal tag*/
+		if (t == -1) {
+	       	        sprintf(log_buf, "ERROR : Cannot create libnet IP ptag\n");
+       		        debug_log(SEVERE, functionname, log_buf);
+			libnet_destroy(plibnet_app);
+			pthread_exit(NULL);
+		}
+
+		val = libnet_write(plibnet_app);
+		if (p->interval > 0) {
+			thread_sleep(p->interval);
+		}
+/*		if(pip->next == NULL) {
+			pip = pip_head;
+		} else {
+			pip = pip->next;
+		}*/
 	}
 	sprintf(log_buf, "INFO : Done with thread routine, totally sent %d packets\n", i);
 	debug_log(INFO, functionname, log_buf);
 	libnet_destroy(plibnet_app);
 	return 0;
+}
+
+IPLinkedList subiplist(IPLinkedList* head, int count) 
+{
+	IPLinkedList p = NULL, r = NULL;
+	int i = 0;
+
+	for(i=0; i<count && *head !=NULL; i++,*head=(*head)->next)
+	{
+		if(p==NULL) {
+			p = *head;
+			r = p;
+		}else {
+			r = r->next;
+		}	
+	}
+	r->next = NULL;
+	return p;
+}
+
+IPLinkedList copyiplist(IPLinkedList head)
+{
+	IPLinkedList p=NULL, q=NULL, r=NULL, pEntry=NULL;
+	int cnt = 0;
+	p = head;
+	while(p != NULL) {
+	        pEntry = (IPLinkedList) malloc(sizeof(IPNode));
+		if(pEntry == NULL) {
+			perror("Memory allocation failed : ");
+			exit(ERROR_MEMORY);
+		}
+	        pEntry->next = NULL;
+		memcpy(&(pEntry->data), &(p->data), sizeof(in_addr_t)); 
+		if(q==NULL) {
+			q = pEntry;
+			r = q;
+		} else {
+			r->next = pEntry;
+			r = r->next;
+		}
+		p = p->next;
+		cnt++;
+	}
+	return q;
 }
 
 MacLinkedList submaclist(MacLinkedList* head, int count) 
@@ -415,6 +473,38 @@ MacLinkedList copymaclist(MacLinkedList head)
 	return q;
 }
 
+BOOL populate_srcmac(char* device, struct config* p)
+{
+	int sockfd;
+	struct ifreq ifr;
+
+        sockfd = socket(AF_INET, SOCK_STREAM, 0);
+        strcpy(ifr.ifr_name, device);
+        if(ioctl(sockfd, SIOCGIFHWADDR, &ifr)<0) {
+                perror("ioctl");
+        }
+        memcpy(&(p->srcmac), (u_int8_t*)(&ifr.ifr_hwaddr.sa_data), MAC_ADDRESS_LENGTH*sizeof(u_int8_t));
+	
+	return TRUE;
+
+}
+
+BOOL populate_srcip(char* device, struct config* p)
+{
+	int sockfd;
+	struct ifreq ifr;
+
+        sockfd = socket(AF_INET, SOCK_STREAM, 0);
+        strcpy(ifr.ifr_name, device);
+        if(ioctl(sockfd, SIOCGIFADDR, &ifr)<0) {
+                perror("ioctl");
+        }
+        memcpy(&(p->srcip), (in_addr_t*)((((struct sockaddr_in*)(&(ifr.ifr_hwaddr)))->sin_addr).s_addr), sizeof(in_addr_t));
+	
+	return TRUE;
+
+}
+
 IPLinkedList enumerate_ip(char* device, int* dstip_cnt)
 {
 	int sockfd;
@@ -426,7 +516,7 @@ IPLinkedList enumerate_ip(char* device, int* dstip_cnt)
 	in_addr_t in_ipaddr;
 	in_addr_t in_broadaddr;
 	in_addr_t in_netmask;
-	int_addr_t in_temp;
+	in_addr_t in_temp;
 
 	int mask_length = 0;
 	int host_length = 0;
@@ -440,17 +530,17 @@ IPLinkedList enumerate_ip(char* device, int* dstip_cnt)
 	if(ioctl(sockfd, SIOCGIFADDR, &ifr)<0) {
 		perror("ioctl");
 	}
-	memcpy(&sa_ipaddr, (struct sockaddr_in*)(&ifr.ifr_addr), sizeof(sockaddr_in));
+	memcpy(&sa_ipaddr, (struct sockaddr_in*)(&ifr.ifr_addr), sizeof(struct sockaddr_in));
 	memcpy(&in_ipaddr, (in_addr_t*)(&sa_ipaddr.sin_addr.s_addr), sizeof(in_addr_t));
         if(ioctl(sockfd, SIOCGIFBRDADDR, &ifr)<0) {
                 perror("ioctl");
         }
-	memcpy(&sa_broadaddr, (struct sockaddr_in*)(&ifr.ifr_broadaddr), sizeof(sockaddr_in));
+	memcpy(&sa_broadaddr, (struct sockaddr_in*)(&ifr.ifr_broadaddr), sizeof(struct sockaddr_in));
 	memcpy(&in_broadaddr, (in_addr_t*)(&sa_broadaddr.sin_addr.s_addr), sizeof(in_addr_t));
         if(ioctl(sockfd, SIOCGIFNETMASK, &ifr)<0) {
                 perror("ioctl");
         }
-	memcpy(&sa_netmask, (struct sockaddr_in*)(&ifr.ifr_netmask), sizeof(sockaddr_in));
+	memcpy(&sa_netmask, (struct sockaddr_in*)(&ifr.ifr_netmask), sizeof(struct sockaddr_in));
 	memcpy(&in_netmask, (in_addr_t*)(&sa_netmask.sin_addr.s_addr), sizeof(in_addr_t));
 	memcpy(&in_temp, (in_addr_t*)in_netmask, sizeof(in_addr_t));
 
@@ -465,7 +555,7 @@ IPLinkedList enumerate_ip(char* device, int* dstip_cnt)
 	while(i<j) {
 		t = (IPLinkedList)malloc(sizeof(IPNode));
 		t->next = NULL;
-		t->data = (in_addr_t)((i<<mask_length) | in_netmaks);
+		t->data = (in_addr_t)((i<<mask_length) | in_netmask);
 		if(head == NULL) {
 			head = t;
 			r = head;
@@ -476,6 +566,8 @@ IPLinkedList enumerate_ip(char* device, int* dstip_cnt)
 		i++;
 		(*dstip_cnt)++;
 	}
+	
+	close(sockfd);
 
 	return head;
 }
@@ -483,7 +575,6 @@ IPLinkedList enumerate_ip(char* device, int* dstip_cnt)
 MacLinkedList loadMacFile(const char* mac_file, int* cnt) {
 	MacLinkedList list, p, r;
 	list = (MacLinkedList) malloc(sizeof(MacNode));
-/*	list->data = NULL; */
 	list->next = NULL;
 	p = NULL;
 	r = list;
@@ -497,25 +588,16 @@ MacLinkedList loadMacFile(const char* mac_file, int* cnt) {
 		return NULL;
 	}
 	while (fgets(str, FILE_LINE_BUFFER_SIZE, fp) != NULL) {
-/*		u_int8_t* buf = malloc(MAC_ADDRESS_LENGTH * sizeof(u_int8_t)); 
-		if (buf == NULL) {
-			perror("");
-			fclose(fp);
-			return NULL;
-		}
-*/
 		if (*cnt == 0) {
 			mac_addr_aton(str, list->data);
 		} else {
 			p = (MacLinkedList) malloc(sizeof(MacNode));
-/*			p->data = NULL; */
 			p->next = NULL;
 			if (p == NULL) {
 				perror("");
 				fclose(fp);
 				return NULL;
 			}
-/*			p->data = mac_addr_aton(str, buf); */
 			mac_addr_aton(str, p->data);
 			r->next = p;
 			r = p;
@@ -538,13 +620,11 @@ struct config* load_config(const char* config_file) {
 		perror("Config file open ERROR! : ");
 		return NULL;
 	}
-	struct config * pointer_config = (struct config*) malloc(
-			sizeof(struct config));
+	struct config * pointer_config = (struct config*) malloc(sizeof(struct config));
 	if (pointer_config == NULL) {
 		perror("Memory allocation ERROR ! : ");
 		return NULL;
 	}
-	pointer_config->mac_data_file = NULL;
 	pointer_config->device = NULL;
 	pointer_config->logfile = NULL;
 	while (fgets(buffer, FILE_LINE_BUFFER_SIZE, file_handler) != NULL) {
@@ -556,23 +636,9 @@ struct config* load_config(const char* config_file) {
 			continue;
 		}
 		switch (switch_config_name(name)) {
-		case CONFIG_THREADS:
-			pointer_config->threads = atoi(value);
-			config_flag |= CONFIG_THREADS;
-			break;
-		case CONFIG_MACFILE:
-			pointer_config->mac_data_file = (char*) malloc(
-					sizeof(char) * (1 + strlen(value)));
-			strcpy(pointer_config->mac_data_file, value);
-			config_flag |= CONFIG_MACFILE;
-			break;
-		case CONFIG_SRCIP:
-			inet_pton(AF_INET, value, &(pointer_config->srcip));
-			config_flag |= CONFIG_SRCIP;
-			break;
-		case CONFIG_DSTIP:
-			inet_pton(AF_INET, value, &(pointer_config->dstip));
-			config_flag |= CONFIG_DSTIP;
+		case CONFIG_IP_QTY_THREAD:
+			pointer_config->ip_qty_thread = atoi(value);
+			config_flag |= CONFIG_IP_QTY_THREAD;
 			break;
 		case CONFIG_DSTMAC:
 			mac_addr_aton(value, pointer_config->dstmac);
@@ -583,8 +649,7 @@ struct config* load_config(const char* config_file) {
 			config_flag |= CONFIG_INTERVAL;
 			break;
 		case CONFIG_DEVICE:
-			pointer_config->device = (char*) malloc(
-					sizeof(char) * (1 + strlen(value)));
+			pointer_config->device = (char*) malloc(sizeof(char) * (1 + strlen(value)));
 			strcpy(pointer_config->device, value);
 			config_flag |= CONFIG_DEVICE;
 			break;
@@ -592,17 +657,8 @@ struct config* load_config(const char* config_file) {
 			pointer_config->size = atoi(value);
 			config_flag |= CONFIG_SIZE;
 			break;
-		case CONFIG_POWER:
-			pointer_config->power = atoi(value);
-			config_flag |= CONFIG_POWER;
-			break;
-		case CONFIG_COUNT:
-			pointer_config->count = atoi(value);
-			config_flag |= CONFIG_COUNT;
-			break;
 		case CONFIG_LOGFILE:
-			pointer_config->logfile = (char*) malloc(
-					sizeof(char) * (1 + strlen(value)));
+			pointer_config->logfile = (char*) malloc(sizeof(char) * (1 + strlen(value)));
 			strcpy(pointer_config->logfile, value);
 			config_flag |= CONFIG_LOGFILE;
 			break;
@@ -614,6 +670,7 @@ struct config* load_config(const char* config_file) {
 			break;
 		}
 	}
+/*
 	if (config_flag != 0xFFF) {
 		free(pointer_config);
 		if (pointer_config->device != NULL)
@@ -624,14 +681,15 @@ struct config* load_config(const char* config_file) {
 			free(pointer_config->logfile);
 		return NULL;
 	}
+*/
+	populate_srcmac(pointer_config->device, pointer_config);
+	populate_srcip(pointer_config->device, pointer_config);
 	return pointer_config;
 }
 
 void freeConfig(struct config *p_config) {
 	if (p_config->device != NULL)
 		free(p_config->device);
-	if (p_config->mac_data_file != NULL)
-		free(p_config->mac_data_file);
 	if (p_config->logfile != NULL)
 		free(p_config->logfile);
 }
@@ -673,13 +731,10 @@ int setTxPower(char* interface, int nmW){
 	return ret_code;
 }
 
-void freeMacLinkedList(MacLinkedList list) {
-	MacLinkedList p, q;
+void freeIPLinkedList(IPLinkedList list) {
+	IPLinkedList p, q;
 	p = list;
 	while (p != NULL) {
-/*		if (p->data != NULL) {
-			free(p->data);
-		} */
 		q = p;
 		p = p->next;
 		free(q);
@@ -691,8 +746,8 @@ void freeThreadInput(struct thread_input* input){
 		free(input->device);
 	if(input->payload != NULL)
 		free(input->payload);
-	if(input->srcmac != NULL)
-		freeMacLinkedList(input->srcmac);
+	if(input->dstip != NULL)
+		freeIPLinkedList(input->dstip);
 }
 
 int main(int argc, char* argv[]) {
@@ -751,10 +806,8 @@ int main(int argc, char* argv[]) {
 		}
 	} */
 
-	enumerate_ip(pointer_config->device, &dstip_cnt);
-	int threadCount = pointer_config->threads;
-	MacLinkedList head = loadMacFile(pointer_config->mac_data_file, &srcmac_cnt);
-	int srcmac_qty_thread = srcmac_cnt/threadCount;
+	IPLinkedList head = enumerate_ip(pointer_config->device, &dstip_cnt);
+	int threadCount = dstip_cnt / pointer_config->ip_qty_thread;
 	u_int8_t *payload = NULL;
 	if(pointer_config->size > 0) {
 		u_int8_t *payload = malloc(pointer_config->size*sizeof(u_int8_t));
@@ -769,10 +822,8 @@ int main(int argc, char* argv[]) {
 		(input+i)->device = malloc((1+strlen(pointer_config->device))*sizeof(char));
 		memcpy((input+i)->device, pointer_config->device, (1+strlen(pointer_config->device))*sizeof(char));
 		(input+i)->interval = pointer_config->interval;
-		(input+i)->count = pointer_config->count;
 		(input+i)->size = pointer_config->size;
 		(input+i)->srcip = pointer_config->srcip;
-		(input+i)->dstip = pointer_config->dstip;
 		memcpy((input+i)->dstmac, pointer_config->dstmac, MAC_ADDRESS_LENGTH*sizeof(u_int8_t));
 		if(pointer_config->size != 0) {
 			(input+i)->payload = (u_int8_t*) malloc(pointer_config->size*sizeof(u_int8_t));
@@ -781,16 +832,12 @@ int main(int argc, char* argv[]) {
 			(input+i)->payload = NULL;
 		}
 		if(i+1 == threadCount) {
-			(input+i)->srcmac = submaclist(&head, 2*srcmac_qty_thread); // get all of the remains 
+			(input+i)->dstip = subiplist(&head, 2*pointer_config->ip_qty_thread); // get all of the remains 
 		} else {
-			(input+i)->srcmac = submaclist(&head, srcmac_qty_thread);
+			(input+i)->dstip = subiplist(&head, pointer_config->ip_qty_thread);
 		}
  
-/*
-		(input+i)->srcmac = copymaclist(head);
-*/
 		pthread_create(&tid[i], NULL, thread_routine, (void*)(input+i));
-		thread_sleep(pointer_config->interval);
 	}
 
 	/* Wait all worker thread to complete tasks */
