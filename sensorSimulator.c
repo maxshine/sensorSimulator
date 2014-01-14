@@ -25,6 +25,7 @@
 #include <pwd.h>
 #include <dirent.h>
 #include <stdarg.h>
+#include <netinet/in.h>
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/types.h>
@@ -88,8 +89,8 @@ struct config {
 	int power;
 	int size;
 	int count;
-	u_int32_t srcip;
-	u_int32_t dstip;
+	in_addr_t srcip;
+	in_addr_t dstip;
 	u_int8_t dstmac[MAC_ADDRESS_LENGTH];
 };
 
@@ -99,8 +100,8 @@ struct thread_input {
 	int count;
 	u_int8_t* payload;
 	u_int16_t size;
-	u_int32_t srcip;
-	u_int32_t dstip;
+	in_addr_t srcip;
+	in_addr_t dstip;
 	MacLinkedList srcmac;
 	u_int8_t dstmac[MAC_ADDRESS_LENGTH];
 };

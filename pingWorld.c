@@ -10,6 +10,10 @@
 #include <pwd.h>
 #include <dirent.h>
 #include <stdarg.h>
+#include <net/if.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/types.h>
@@ -56,6 +60,11 @@ typedef struct mac_node {
 	u_int8_t data[MAC_ADDRESS_LENGTH];
 	struct mac_node *next;
 } MacNode, *MacLinkedList;
+
+typedef struct ip_node {
+	in_addr_t data;
+	struct ip_node *next;
+} IPNode, *IPLinkedList;
 
 typedef struct log_descriptor {
 	FILE * log_file_handler;
@@ -406,6 +415,71 @@ MacLinkedList copymaclist(MacLinkedList head)
 	return q;
 }
 
+IPLinkedList enumerate_ip(char* device, int* dstip_cnt)
+{
+	int sockfd;
+	struct sockaddr_in sa_ipaddr;
+	struct sockaddr_in sa_broadaddr;
+	struct sockaddr_in sa_netmask;
+	struct ifreq ifr;
+
+	in_addr_t in_ipaddr;
+	in_addr_t in_broadaddr;
+	in_addr_t in_netmask;
+	int_addr_t in_temp;
+
+	int mask_length = 0;
+	int host_length = 0;
+	int i = 0, j = 0;
+
+	IPLinkedList head=NULL, r=NULL, t=NULL;
+	*dstip_cnt = 0;
+
+	sockfd = socket(AF_INET, SOCK_STREAM, 0);
+	strcpy(ifr.ifr_name, device);
+	if(ioctl(sockfd, SIOCGIFADDR, &ifr)<0) {
+		perror("ioctl");
+	}
+	memcpy(&sa_ipaddr, (struct sockaddr_in*)(&ifr.ifr_addr), sizeof(sockaddr_in));
+	memcpy(&in_ipaddr, (in_addr_t*)(&sa_ipaddr.sin_addr.s_addr), sizeof(in_addr_t));
+        if(ioctl(sockfd, SIOCGIFBRDADDR, &ifr)<0) {
+                perror("ioctl");
+        }
+	memcpy(&sa_broadaddr, (struct sockaddr_in*)(&ifr.ifr_broadaddr), sizeof(sockaddr_in));
+	memcpy(&in_broadaddr, (in_addr_t*)(&sa_broadaddr.sin_addr.s_addr), sizeof(in_addr_t));
+        if(ioctl(sockfd, SIOCGIFNETMASK, &ifr)<0) {
+                perror("ioctl");
+        }
+	memcpy(&sa_netmask, (struct sockaddr_in*)(&ifr.ifr_netmask), sizeof(sockaddr_in));
+	memcpy(&in_netmask, (in_addr_t*)(&sa_netmask.sin_addr.s_addr), sizeof(in_addr_t));
+	memcpy(&in_temp, (in_addr_t*)in_netmask, sizeof(in_addr_t));
+
+	while(in_temp > 0) {
+		mask_length++;
+		in_temp = in_temp >> 1;
+	}
+	host_length = sizeof(in_addr_t)*8 - mask_length;
+
+	i = 1;
+	j = (~in_netmask)>>mask_length;
+	while(i<j) {
+		t = (IPLinkedList)malloc(sizeof(IPNode));
+		t->next = NULL;
+		t->data = (in_addr_t)((i<<mask_length) | in_netmaks);
+		if(head == NULL) {
+			head = t;
+			r = head;
+		} else {
+			r->next = t;
+			r = r->next;
+		}
+		i++;
+		(*dstip_cnt)++;
+	}
+
+	return head;
+}
+
 MacLinkedList loadMacFile(const char* mac_file, int* cnt) {
 	MacLinkedList list, p, r;
 	list = (MacLinkedList) malloc(sizeof(MacNode));
@@ -625,6 +699,7 @@ int main(int argc, char* argv[]) {
 
 	int c;
 	int srcmac_cnt;
+	int dstip_cnt;
 	int i = 0;
 	char log_buf[FILE_LINE_BUFFER_SIZE];
 	char *functionname = "main";
@@ -658,15 +733,15 @@ int main(int argc, char* argv[]) {
         sprintf(log_buf, "INFO : Program is started \n");
         debug_log(INFO, functionname, log_buf);
 
-	/* check wireless interface work */
+	/* check wireless interface work 
 	if (getInterfaceStatus(pointer_config->device) != 0) {
 		sprintf(log_buf, "ERROR : Interface %s is not associated with any AP, please check it, exiting...\n", pointer_config->device);
 		debug_log(SEVERE, functionname, log_buf);
 		puts(log_buf);
 		return ERROR_HARDWARE;
-	}
+	}*/
 
-	/* set wireless interface tx power */
+	/* set wireless interface tx power 
 	if (pointer_config->power != 0) {
 		if (setTxPower(pointer_config->device, pointer_config->power) != 0) {
 			sprintf(log_buf, "ERROR : Not able to manipulate the WiFi interface %s for new txPower, exiting...\n", pointer_config->device);
@@ -674,8 +749,9 @@ int main(int argc, char* argv[]) {
 			puts(log_buf);
 			return ERROR_HARDWARE;
 		}
-	}
+	} */
 
+	enumerate_ip(pointer_config->device, &dstip_cnt);
 	int threadCount = pointer_config->threads;
 	MacLinkedList head = loadMacFile(pointer_config->mac_data_file, &srcmac_cnt);
 	int srcmac_qty_thread = srcmac_cnt/threadCount;
