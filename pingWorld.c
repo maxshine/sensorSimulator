@@ -22,7 +22,7 @@
 #define FILE_LINE_BUFFER_SIZE 200
 #define MAC_ADDRESS_LENGTH 6
 #define CONFIG_IP_QTY_THREAD  0x01
-#define CONFIG_MACFILE  0x02
+#define CONFIG_BROADCAST 0x02
 #define CONFIG_SRCIP    0x04
 #define CONFIG_DSTIP    0x08
 #define CONFIG_DSTMAC   0x10
@@ -76,6 +76,7 @@ struct config {
 	char* device;
 	char* logfile;
 	LogLevel loglevel;
+	BOOL broadcast;
 	int interval;
 	int ip_qty_thread;
 	int size;
@@ -155,8 +156,8 @@ int switch_config_name(const char* p) {
 	if (strcmp(p, "ip_qty_thread") == 0) {
 		return CONFIG_IP_QTY_THREAD;
 	}
-	if (strcmp(p, "macfile") == 0) {
-		return CONFIG_MACFILE;
+	if (strcmp(p, "broadcast") == 0) {
+		return CONFIG_BROADCAST;
 	}
 	if (strcmp(p, "srcip") == 0) {
 		return CONFIG_SRCIP;
@@ -253,6 +254,117 @@ void thread_sleep (int timeout)
         pthread_mutex_destroy(&mutex);
 }
 
+void* thread_routine_b(void* input) {
+	struct thread_input *p = input;
+	IPLinkedList pip = p->dstip;
+	IPLinkedList pip_head = p->dstip;
+	libnet_t *plibnet_app;
+	char errbuf[LIBNET_ERRBUF_SIZE];
+	libnet_ptag_t udp_ptag, icmp_ptag, ip_ptag, eth_ptag, t;
+	int i = 0;
+	int val = 0;
+	char log_buf[FILE_LINE_BUFFER_SIZE];
+	char *functionname = "thread_routine";
+
+	sprintf(log_buf, "INFO : Enter thread routine to send composed packets\n");
+	debug_log(INFO, functionname, log_buf);
+
+	plibnet_app = libnet_init(LIBNET_LINK_ADV, p->device, errbuf);
+//	plibnet_app = libnet_init(LIBNET_RAW4, p->device, errbuf);
+	if (plibnet_app == NULL) {
+		sprintf(log_buf, "ERROR : Cannot initialize libnet context\n");
+		debug_log(SEVERE, functionname, log_buf);
+		pthread_exit(NULL);
+	}
+
+	icmp_ptag = libnet_build_icmpv4_echo(ICMP_ECHO, /* echo request type */
+		0, /* reuqest code zero for echo request */
+		0, /* ask libnet to fill in checksum */
+		0, /* id for icmp */
+		0, /* seq for icmp id */
+		p->payload, /* payload */
+		p->size, /* payload length */
+		plibnet_app, /* libnet context */
+		0); /* create new ICMP protocal tag */
+        if (icmp_ptag == -1) {
+                sprintf(log_buf, "ERROR : Cannot create libnet ICMP ptag\n");
+                debug_log(SEVERE, functionname, log_buf);
+		sprintf(log_buf, "%s\n", libnet_geterror(plibnet_app));
+                debug_log(SEVERE, functionname, log_buf);
+                libnet_destroy(plibnet_app);
+                pthread_exit(NULL);
+        }
+
+
+	ip_ptag = libnet_build_ipv4(
+	LIBNET_IPV4_H + LIBNET_UDP_H + p->size, /*Total length of IP packet*/
+	0, /*TOS*/
+	0x42, /*IP ID*/
+	0, /*IP Fragment*/
+	64, /*IP TTL*/
+	IPPROTO_ICMP, /*IP Protocal*/
+	0, /*libnet autofill checksum*/
+	p->srcip, /*Source IP address*/
+	p->dstip->data, /*Destination IP address*/
+	NULL, /*Payload pointer*/
+	0, /*payload size*/
+	plibnet_app, /*libnet context*/
+	0); /*create new IP protocal tag*/
+	if (ip_ptag == -1) {
+                sprintf(log_buf, "ERROR : Cannot create libnet IP ptag\n");
+                debug_log(SEVERE, functionname, log_buf);
+		libnet_destroy(plibnet_app);
+		pthread_exit(NULL);
+	}
+
+	eth_ptag = libnet_build_ethernet(p->dstmac,
+	p->srcmac,
+	ETHERTYPE_IP,
+	NULL,
+	0,
+	plibnet_app,
+	0);
+	if (eth_ptag == -1) {
+                sprintf(log_buf, "ERROR : Cannot create libnet ETHERNET ptag\n");
+                debug_log(SEVERE, functionname, log_buf);
+		libnet_destroy(plibnet_app);
+		pthread_exit(NULL);
+	}
+
+	while(pip != NULL) {
+		//libnet_adv_cull_packet(plibnet_app, &packet, &packet_size);
+		t = libnet_build_ipv4(
+		LIBNET_IPV4_H + LIBNET_UDP_H + p->size, /*Total length of IP packet*/
+			0, /*TOS*/
+			0x42, /*IP ID*/
+			0, /*IP Fragment*/
+			64, /*IP TTL*/
+			IPPROTO_ICMP, /*IP Protocal*/
+			0, /*libnet autofill checksum*/
+			p->srcip, /*Source IP address*/
+			pip->data, /*Destination IP address*/
+			NULL, /*Payload pointer*/
+			0, /*payload size*/
+			plibnet_app, /*libnet context*/
+			ip_ptag); /*create new IP protocal tag*/
+		if (t == -1) {
+	       	        sprintf(log_buf, "ERROR : Cannot modify libnet IP ptag\n");
+       		        debug_log(SEVERE, functionname, log_buf);
+			libnet_destroy(plibnet_app);
+			pthread_exit(NULL);
+		}
+
+		val = libnet_write(plibnet_app);
+		if (p->interval > 0) {
+			thread_sleep(p->interval);
+		}
+		pip = pip->next;
+	}
+	sprintf(log_buf, "INFO : Done with thread routine, totally sent %d packets\n", i);
+	debug_log(INFO, functionname, log_buf);
+	libnet_destroy(plibnet_app);
+	return 0;
+}
 
 void* thread_routine(void* input) {
 	struct thread_input *p = input;
@@ -317,38 +429,9 @@ void* thread_routine(void* input) {
 		pthread_exit(NULL);
 	}
 
-/*	eth_ptag = libnet_build_ethernet(p->dstmac,
-	(p->srcmac)->data,
-	ETHERTYPE_IP,
-	NULL,
-	0,
-	plibnet_app,
-	0);
-	if (eth_ptag == -1) {
-                sprintf(log_buf, "ERROR : Cannot create libnet ETHERNET ptag\n");
-                debug_log(SEVERE, functionname, log_buf);
-		libnet_destroy(plibnet_app);
-		pthread_exit(NULL);
-	}
-*/
-
 	while(pip != NULL) {
 		//libnet_adv_cull_packet(plibnet_app, &packet, &packet_size);
-/*		if (pmac->data != NULL) {
-			t = libnet_build_ethernet(p->dstmac,
-			pmac->data,
-			ETHERTYPE_IP,
-			NULL,
-			0,
-			plibnet_app,
-			eth_ptag);
-			if (t == -1) {
-		                sprintf(log_buf, "ERROR : Cannot modify libnet ETHERNET ptag\n");
-               			debug_log(SEVERE, functionname, log_buf);
-				libnet_destroy(plibnet_app);
-				pthread_exit(NULL);
-			}
-*/		t = libnet_build_ipv4(
+		t = libnet_build_ipv4(
 		LIBNET_IPV4_H + LIBNET_UDP_H + p->size, /*Total length of IP packet*/
 			0, /*TOS*/
 			0x42, /*IP ID*/
@@ -361,9 +444,9 @@ void* thread_routine(void* input) {
 			NULL, /*Payload pointer*/
 			0, /*payload size*/
 			plibnet_app, /*libnet context*/
-			0); /*create new IP protocal tag*/
+			ip_ptag); /*create new IP protocal tag*/
 		if (t == -1) {
-	       	        sprintf(log_buf, "ERROR : Cannot create libnet IP ptag\n");
+	       	        sprintf(log_buf, "ERROR : Cannot modify libnet IP ptag\n");
        		        debug_log(SEVERE, functionname, log_buf);
 			libnet_destroy(plibnet_app);
 			pthread_exit(NULL);
@@ -373,11 +456,7 @@ void* thread_routine(void* input) {
 		if (p->interval > 0) {
 			thread_sleep(p->interval);
 		}
-/*		if(pip->next == NULL) {
-			pip = pip_head;
-		} else {
-			pip = pip->next;
-		}*/
+		pip = pip->next;
 	}
 	sprintf(log_buf, "INFO : Done with thread routine, totally sent %d packets\n", i);
 	debug_log(INFO, functionname, log_buf);
@@ -484,6 +563,7 @@ BOOL populate_srcmac(char* device, struct config* p)
                 perror("ioctl");
         }
         memcpy(&(p->srcmac), (u_int8_t*)(&ifr.ifr_hwaddr.sa_data), MAC_ADDRESS_LENGTH*sizeof(u_int8_t));
+	close(sockfd);
 	
 	return TRUE;
 
@@ -499,7 +579,8 @@ BOOL populate_srcip(char* device, struct config* p)
         if(ioctl(sockfd, SIOCGIFADDR, &ifr)<0) {
                 perror("ioctl");
         }
-        memcpy(&(p->srcip), (in_addr_t*)((((struct sockaddr_in*)(&(ifr.ifr_hwaddr)))->sin_addr).s_addr), sizeof(in_addr_t));
+        memcpy(&(p->srcip), (in_addr_t*)&((((struct sockaddr_in*)(&(ifr.ifr_addr)))->sin_addr).s_addr), sizeof(in_addr_t));
+	close(sockfd);
 	
 	return TRUE;
 
@@ -542,7 +623,7 @@ IPLinkedList enumerate_ip(char* device, int* dstip_cnt)
         }
 	memcpy(&sa_netmask, (struct sockaddr_in*)(&ifr.ifr_netmask), sizeof(struct sockaddr_in));
 	memcpy(&in_netmask, (in_addr_t*)(&sa_netmask.sin_addr.s_addr), sizeof(in_addr_t));
-	memcpy(&in_temp, (in_addr_t*)in_netmask, sizeof(in_addr_t));
+	memcpy(&in_temp, (in_addr_t*)&in_netmask, sizeof(in_addr_t));
 
 	while(in_temp > 0) {
 		mask_length++;
@@ -555,7 +636,7 @@ IPLinkedList enumerate_ip(char* device, int* dstip_cnt)
 	while(i<j) {
 		t = (IPLinkedList)malloc(sizeof(IPNode));
 		t->next = NULL;
-		t->data = (in_addr_t)((i<<mask_length) | in_netmask);
+		t->data = (in_addr_t)((i<<mask_length) | (in_broadaddr<<host_length)>>host_length);
 		if(head == NULL) {
 			head = t;
 			r = head;
@@ -639,6 +720,10 @@ struct config* load_config(const char* config_file) {
 		case CONFIG_IP_QTY_THREAD:
 			pointer_config->ip_qty_thread = atoi(value);
 			config_flag |= CONFIG_IP_QTY_THREAD;
+			break;
+		case CONFIG_BROADCAST:
+			pointer_config->broadcast = atoi(value)==0?FALSE:TRUE;
+			config_flag |= CONFIG_BROADCAST;
 			break;
 		case CONFIG_DSTMAC:
 			mac_addr_aton(value, pointer_config->dstmac);
@@ -757,6 +842,7 @@ int main(int argc, char* argv[]) {
 	int dstip_cnt;
 	int i = 0;
 	char log_buf[FILE_LINE_BUFFER_SIZE];
+	u_int8_t broadcast_mac_addr[MAC_ADDRESS_LENGTH] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
 	char *functionname = "main";
 	struct config* pointer_config = NULL;
 
@@ -788,13 +874,13 @@ int main(int argc, char* argv[]) {
         sprintf(log_buf, "INFO : Program is started \n");
         debug_log(INFO, functionname, log_buf);
 
-	/* check wireless interface work 
+	/* check wireless interface work */
 	if (getInterfaceStatus(pointer_config->device) != 0) {
 		sprintf(log_buf, "ERROR : Interface %s is not associated with any AP, please check it, exiting...\n", pointer_config->device);
 		debug_log(SEVERE, functionname, log_buf);
 		puts(log_buf);
 		return ERROR_HARDWARE;
-	}*/
+	}
 
 	/* set wireless interface tx power 
 	if (pointer_config->power != 0) {
@@ -808,6 +894,7 @@ int main(int argc, char* argv[]) {
 
 	IPLinkedList head = enumerate_ip(pointer_config->device, &dstip_cnt);
 	int threadCount = dstip_cnt / pointer_config->ip_qty_thread;
+	threadCount = threadCount==0?1:threadCount;
 	u_int8_t *payload = NULL;
 	if(pointer_config->size > 0) {
 		u_int8_t *payload = malloc(pointer_config->size*sizeof(u_int8_t));
@@ -836,8 +923,12 @@ int main(int argc, char* argv[]) {
 		} else {
 			(input+i)->dstip = subiplist(&head, pointer_config->ip_qty_thread);
 		}
- 
-		pthread_create(&tid[i], NULL, thread_routine, (void*)(input+i));
+		if(pointer_config->broadcast == TRUE) {
+			memcpy((input+i)->dstmac, broadcast_mac_addr, MAC_ADDRESS_LENGTH*sizeof(u_int8_t));
+			pthread_create(&tid[i], NULL, thread_routine_b, (void*)(input+i));
+		} else {
+			pthread_create(&tid[i], NULL, thread_routine, (void*)(input+i));
+		}
 	}
 
 	/* Wait all worker thread to complete tasks */
