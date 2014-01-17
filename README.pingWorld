@@ -1,12 +1,7 @@
 General Introduction
 --------------------
 
-This is a small tool to compose network packet for specific purpose of WiFi sensor testing. WiFi sensor is a normal interface device running in Monitor mode, which will capture all data packets reaching it in the air. To test it, it needs a simulator tool to generate any amount of packets at will to give the device desired workload. The main business of tested WiFi sensor is to capture MAC addresses from the packets it receives, so there are following factors to define the "workload" against target tested sensor devices:
-	- Quantity of devices moving around sensor simultaneously
-	- Packet size
-	- Tx power level of WiFi signal carrying sent packet 
-
-So this tool make these factor as configurable. It can compose UDP-based packets with desired size, and vary the MAC address data in the data frame. It make used of pthread API to send data concrrently. The workload is simple as: read in the configuration, create threads, each threads send out desired amount composed packets at desired interval, clean up and exit.
+The fundamental of location algorithm is basded on wireless signal sent out by located mobile devices. However in 802.11 protocal, it has mechanism to save power for 802.11 devices. The devices are to sleep and shutdown transmitter. This tool is trying to keep all mobile devices in the same sub-network alive, so that it will keep sending packets periodically and its location could be calculated and updated in time. 
 
 Pre-requisites:
 ---------------
@@ -18,47 +13,30 @@ For other distribution with different package management system, refer their man
 
 The tool also make use of iw-based wireless tool to manipulate WiFi interface at low level. Please ensure it's installed correctly, and check it by command `iwconfig`, see if it could list all wireless interface in the box.
 
-The tool needs a wireless interface connected with any WiFi network. So the interface mode should be `managed` and associated a AP(access point). You could check this with `iwconfig` command.
+The tool need to reach the all addresses in the same sub-network, it doesn't care sending packets via wire or wireless interface. If wireless is to be used, the tool needs a wireless interface connected with any WiFi network. So the interface mode should be `managed` and associated a AP(access point). You could check this with `iwconfig` command.
+
+To ensure all addresses are accessible by the tool via specific interface, please consult IT specialist about the network configuration details.
 
 Compile instructions:
---------------------
+---------------------
 
-macDataGenerator.c - This is a small utility to help generate MAC address into a data file for future usage. To compile it's simple as:
-	gcc macDataGenerator.c -o macDataGenerator
-	
-sensorSimulator.c - This is the main program of simulation tool, all-in-one source file. To compile use following command:
-	gcc sensorSimulator.c -o sensorSimulator -lnet -pthread
+pingWorld.c - This is the main program of tool, all-in-one source file. To compile use following command:
+	gcc pingWorld.c -o pingWorld -lnet -pthread
 
 Please note, MUST use -pthread link parameter, to ensure POSIX API so linked to thread-safe version.
 
 Usage:
 ------
 
-macDataGenerator - the command gramma is :
-	macDataGenerator <MAC address prefix> <quantity to be generated> <output data file>
-
-i.e.	macDataGenerator 00:06:09 1000 macid.data
-The MAC address in macid.data would be like: 
-	00:06:09:00:00:01
-	00:06:09:00:00:02
-	00:06:09:00:00:03
-	.....
-	00:06:09:00:03:ef
-The prefix parameter should have at least one digit, like 10 or fe. The tool prints out generated entry in low case. It could do parameters check automatically, like the quantity input should not exceeds possible upper limit.  Please note, the tool omits the entries will all-zero and all-FF ones.
-
-sensorSimulator - the command could be issued :
-	sensorSimulator -c <configuration file>
+pingWorld - the command could be issued :
+	pingWorld -c <configuration file>
 
 About configuration file details, please refer to the sample one in the package.
 
 Tips:
 -----
+There are two mode of this tool to wake up the device.
+1. Send ARP broadcast -> send out data packet targeted to the address resolved by ARP broadcast -> device received wakes up
+2. Send out data packet to broadcast, so all devices receive and wake up
 
-One thing to highlighted here is about the tx power parameter in the configuration properties file. Before running this tool, you could connect the wireless interface with any network and run command `iwconfig <interface name>`, then find a line with tx-power value. That's the default value for the interface hardware, usually it's the 100% power capability and you should use as the baseline. Note in the output of `iwconfig`, the unit is 'dB', which means decibel. You could convert it into unit as 'milli-watt' as used in configuration properties file, with below formula:
-	milli_watt = 10^(dB_value/10)
-
-The tool uses milli-watt as unit because it has better resolution than decibel, although it's hardware's matter how to handle it eventually.
-
-For testing purpose, tester would like to know which radio channel the transmitting wireless interface is on. Here is a tips to check it. Still use `iwconfig <interface name>`, and you could see the value for 'frequency'. Then you could just use below link of wikipedia to find out map between frequency and the channel number:
-	http://en.wikipedia.org/wiki/List_of_WLAN_channels
-
+During the experiment, not all devices respond ARP broadcast, but not all devices respond to normal broadcast. So that's the reason two mode developed here for more coverage. Use any mode at your convenience.
