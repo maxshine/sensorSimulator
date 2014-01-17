@@ -18,6 +18,8 @@ For other distribution with different package management system, refer their man
 
 The tool also make use of iw-based wireless tool to manipulate WiFi interface at low level. Please ensure it's installed correctly, and check it by command `iwconfig`, see if it could list all wireless interface in the box.
 
+The tool needs a wireless interface connected with any WiFi network. So the interface mode should be `managed` and associated a AP(access point). You could check this with `iwconfig` command.
+
 Compile instructions:
 --------------------
 
@@ -26,6 +28,7 @@ macDataGenerator.c - This is a small utility to help generate MAC address into a
 	
 sensorSimulator.c - This is the main program of simulation tool, all-in-one source file. To compile use following command:
 	gcc sensorSimulator.c -o sensorSimulator -lnet -pthread
+
 Please note, MUST use -pthread link parameter, to ensure POSIX API so linked to thread-safe version.
 
 Usage:
@@ -47,3 +50,11 @@ sensorSimulator - the command could be issued :
 	sensorSimulator -c <configuration file>
 
 About configuration file details, please refer to the sample one in the package.
+
+Tips:
+-----
+
+One thing to highlighted here is about the tx power parameter in the configuration properties file. Before running this tool, you could connect the wireless interface with any network and run command `iwconfig <interface name>`, then find a line with tx-power value. That's the default value for the interface hardware, usually it's the 100% power capability and you should use as the baseline. Note in the output of `iwconfig`, the unit is 'dB', which means decibel. You could convert it into unit as 'milli-watt' as used in configuration properties file, with below formula:
+	milli_watt = 10^(dB_value/10)
+
+The tool uses milli-watt as unit because it has better resolution than decibel, although it's hardware's matter how to handle it eventually.

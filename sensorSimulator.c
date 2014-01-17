@@ -220,7 +220,8 @@ int switch_log_level(const char* p) {
 
 u_int8_t* mac_addr_aton(char* p, u_int8_t* buf) {
 	int i = 0;
-	char *t = strtok(p, ":");
+	char *c = strdup(p);
+	char *t = strtok(c, ":");
 	while (i < MAC_ADDRESS_LENGTH && t != NULL) {
 		buf[i++] =
 				(u_int8_t) ((t[0]
@@ -233,6 +234,7 @@ u_int8_t* mac_addr_aton(char* p, u_int8_t* buf) {
 										0x30)));
 		t = strtok(NULL, ":");
 	}
+	free(c);
 	return buf;
 }
 
@@ -285,6 +287,8 @@ void* thread_routine(void* input) {
 	if (plibnet_app == NULL) {
 		sprintf(log_buf, "ERROR : Cannot initialize libnet context\n");
 		debug_log(SEVERE, functionname, log_buf);
+		sprintf(log_buf, "ERROR : libnet error %s\n", libnet_geterror(plibnet_app));
+		debug_log(SEVERE, functionname, log_buf);
 		pthread_exit(NULL);
 	}
 
@@ -298,6 +302,8 @@ void* thread_routine(void* input) {
 	0); /*create new UDP protocal tag*/
 	if (udp_ptag == -1) {
                 sprintf(log_buf, "ERROR : Cannot create libnet UDP ptag\n");
+                debug_log(SEVERE, functionname, log_buf);
+                sprintf(log_buf, "ERROR : libnet error %s\n", libnet_geterror(plibnet_app));
                 debug_log(SEVERE, functionname, log_buf);
 		libnet_destroy(plibnet_app);
 		pthread_exit(NULL);
@@ -320,6 +326,8 @@ void* thread_routine(void* input) {
 	if (ip_ptag == -1) {
                 sprintf(log_buf, "ERROR : Cannot create libnet IP ptag\n");
                 debug_log(SEVERE, functionname, log_buf);
+                sprintf(log_buf, "ERROR : libnet error %s\n", libnet_geterror(plibnet_app));
+                debug_log(SEVERE, functionname, log_buf);
 		libnet_destroy(plibnet_app);
 		pthread_exit(NULL);
 	}
@@ -333,6 +341,8 @@ void* thread_routine(void* input) {
 	0); /*ptr to packet memory*/
 	if (eth_ptag == -1) {
                 sprintf(log_buf, "ERROR : Cannot create libnet ETHERNET ptag\n");
+                debug_log(SEVERE, functionname, log_buf);
+                sprintf(log_buf, "ERROR : libnet error %s\n", libnet_geterror(plibnet_app));
                 debug_log(SEVERE, functionname, log_buf);
 		libnet_destroy(plibnet_app);
 		pthread_exit(NULL);
@@ -351,6 +361,8 @@ void* thread_routine(void* input) {
 			if (t == -1) {
 		                sprintf(log_buf, "ERROR : Cannot modify libnet ETHERNET ptag\n");
                			debug_log(SEVERE, functionname, log_buf);
+		                sprintf(log_buf, "ERROR : libnet error %s\n", libnet_geterror(plibnet_app));
+				debug_log(SEVERE, functionname, log_buf);
 				libnet_destroy(plibnet_app);
 				pthread_exit(NULL);
 			}

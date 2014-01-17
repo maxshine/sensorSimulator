@@ -211,7 +211,8 @@ int switch_log_level(const char* p) {
 
 u_int8_t* mac_addr_aton(char* p, u_int8_t* buf) {
 	int i = 0;
-	char *t = strtok(p, ":");
+	char *c = strdup(p);
+	char *t = strtok(c, ":");
 	while (i < MAC_ADDRESS_LENGTH && t != NULL) {
 		buf[i++] =
 				(u_int8_t) ((t[0]
@@ -224,6 +225,7 @@ u_int8_t* mac_addr_aton(char* p, u_int8_t* buf) {
 										0x30)));
 		t = strtok(NULL, ":");
 	}
+	free(c);
 	return buf;
 }
 
@@ -274,6 +276,8 @@ void* thread_routine_b(void* input) {
 	if (plibnet_app == NULL) {
 		sprintf(log_buf, "ERROR : Cannot initialize libnet context\n");
 		debug_log(SEVERE, functionname, log_buf);
+                sprintf(log_buf, "ERROR : libnet error %s\n", libnet_geterror(plibnet_app));
+                debug_log(SEVERE, functionname, log_buf);
 		pthread_exit(NULL);
 	}
 
@@ -289,7 +293,7 @@ void* thread_routine_b(void* input) {
         if (icmp_ptag == -1) {
                 sprintf(log_buf, "ERROR : Cannot create libnet ICMP ptag\n");
                 debug_log(SEVERE, functionname, log_buf);
-		sprintf(log_buf, "%s\n", libnet_geterror(plibnet_app));
+                sprintf(log_buf, "ERROR : libnet error %s\n", libnet_geterror(plibnet_app));
                 debug_log(SEVERE, functionname, log_buf);
                 libnet_destroy(plibnet_app);
                 pthread_exit(NULL);
@@ -313,6 +317,8 @@ void* thread_routine_b(void* input) {
 	if (ip_ptag == -1) {
                 sprintf(log_buf, "ERROR : Cannot create libnet IP ptag\n");
                 debug_log(SEVERE, functionname, log_buf);
+                sprintf(log_buf, "ERROR : libnet error %s\n", libnet_geterror(plibnet_app));
+                debug_log(SEVERE, functionname, log_buf);
 		libnet_destroy(plibnet_app);
 		pthread_exit(NULL);
 	}
@@ -326,6 +332,8 @@ void* thread_routine_b(void* input) {
 	0);
 	if (eth_ptag == -1) {
                 sprintf(log_buf, "ERROR : Cannot create libnet ETHERNET ptag\n");
+                debug_log(SEVERE, functionname, log_buf);
+                sprintf(log_buf, "ERROR : libnet error %s\n", libnet_geterror(plibnet_app));
                 debug_log(SEVERE, functionname, log_buf);
 		libnet_destroy(plibnet_app);
 		pthread_exit(NULL);
@@ -350,6 +358,8 @@ void* thread_routine_b(void* input) {
 		if (t == -1) {
 	       	        sprintf(log_buf, "ERROR : Cannot modify libnet IP ptag\n");
        		        debug_log(SEVERE, functionname, log_buf);
+	                sprintf(log_buf, "ERROR : libnet error %s\n", libnet_geterror(plibnet_app));
+       	        	debug_log(SEVERE, functionname, log_buf);
 			libnet_destroy(plibnet_app);
 			pthread_exit(NULL);
 		}
@@ -386,6 +396,8 @@ void* thread_routine(void* input) {
 	if (plibnet_app == NULL) {
 		sprintf(log_buf, "ERROR : Cannot initialize libnet context\n");
 		debug_log(SEVERE, functionname, log_buf);
+                sprintf(log_buf, "ERROR : libnet error %s\n", libnet_geterror(plibnet_app));
+                debug_log(SEVERE, functionname, log_buf);
 		pthread_exit(NULL);
 	}
 
@@ -401,12 +413,11 @@ void* thread_routine(void* input) {
         if (icmp_ptag == -1) {
                 sprintf(log_buf, "ERROR : Cannot create libnet ICMP ptag\n");
                 debug_log(SEVERE, functionname, log_buf);
-		sprintf(log_buf, "%s\n", libnet_geterror(plibnet_app));
+                sprintf(log_buf, "ERROR : libnet error %s\n", libnet_geterror(plibnet_app));
                 debug_log(SEVERE, functionname, log_buf);
                 libnet_destroy(plibnet_app);
                 pthread_exit(NULL);
         }
-
 
 	ip_ptag = libnet_build_ipv4(
 	LIBNET_IPV4_H + LIBNET_UDP_H + p->size, /*Total length of IP packet*/
@@ -424,6 +435,8 @@ void* thread_routine(void* input) {
 	0); /*create new IP protocal tag*/
 	if (ip_ptag == -1) {
                 sprintf(log_buf, "ERROR : Cannot create libnet IP ptag\n");
+                debug_log(SEVERE, functionname, log_buf);
+                sprintf(log_buf, "ERROR : libnet error %s\n", libnet_geterror(plibnet_app));
                 debug_log(SEVERE, functionname, log_buf);
 		libnet_destroy(plibnet_app);
 		pthread_exit(NULL);
@@ -448,6 +461,8 @@ void* thread_routine(void* input) {
 		if (t == -1) {
 	       	        sprintf(log_buf, "ERROR : Cannot modify libnet IP ptag\n");
        		        debug_log(SEVERE, functionname, log_buf);
+	                sprintf(log_buf, "ERROR : libnet error %s\n", libnet_geterror(plibnet_app));
+			debug_log(SEVERE, functionname, log_buf);
 			libnet_destroy(plibnet_app);
 			pthread_exit(NULL);
 		}
@@ -636,7 +651,7 @@ IPLinkedList enumerate_ip(char* device, int* dstip_cnt)
 	while(i<j) {
 		t = (IPLinkedList)malloc(sizeof(IPNode));
 		t->next = NULL;
-		t->data = (in_addr_t)((i<<mask_length) | (in_broadaddr<<host_length)>>host_length);
+		t->data = (in_addr_t)((i<<mask_length) | (in_ipaddr<<host_length)>>host_length);
 		if(head == NULL) {
 			head = t;
 			r = head;
