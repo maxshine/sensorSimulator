@@ -1,3 +1,18 @@
+/*
+ *  pingWorld.c v1.0
+ *
+ *  Copyright 2013, 2014 by IBM
+ *  All rights reserved.
+ *
+ *  Copyright (c) 2013 - 2014 IBM Corp Ltd.
+ *  Author: Yang, Gao <ygaobj@cn.ibm.com>
+ *  All rights reserved.
+ *
+ * THIS SOFTWARE IS PROVIDED ``AS IS'' AND WITHOUT ANY EXPRESS OR IMPLIED
+ * WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE.
+ */
+
 #include <libnet.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -24,7 +39,7 @@
 #define CONFIG_IP_QTY_THREAD  0x01
 #define CONFIG_BROADCAST 0x02
 #define CONFIG_SRCIP    0x04
-#define CONFIG_DSTIP    0x08
+#define CONFIG_DSTNET    0x08
 #define CONFIG_DSTMAC   0x10
 #define CONFIG_INTERVAL 0x20
 #define CONFIG_DEVICE   0x40
@@ -75,6 +90,7 @@ typedef struct log_descriptor {
 struct config {
 	char* device;
 	char* logfile;
+	char* dstnet;
 	LogLevel loglevel;
 	BOOL broadcast;
 	int interval;
@@ -162,8 +178,8 @@ int switch_config_name(const char* p) {
 	if (strcmp(p, "srcip") == 0) {
 		return CONFIG_SRCIP;
 	}
-	if (strcmp(p, "dstip") == 0) {
-		return CONFIG_DSTIP;
+	if (strcmp(p, "dstnet") == 0) {
+		return CONFIG_DSTNET;
 	}
 	if (strcmp(p, "dstmac") == 0) {
 		return CONFIG_DSTMAC;
@@ -601,6 +617,44 @@ BOOL populate_srcip(char* device, struct config* p)
 
 }
 
+IPLinkedList enumerate_dstnet_ip(char* dstnet, int* dstip_cnt)
+{
+	char* c = strdup(dstnet);
+	char net[20];
+	int net_length;
+	int host_length;
+	int i, j;
+	in_addr_t in_netaddr;
+	char* tok = strtok(c, ";");
+	IPLinkedList head=NULL, r=NULL, t=NULL;
+	*dstip_cnt = 0;
+	
+	while(tok != NULL) {
+		i = sscanf(tok, "%d/%s", &net_length, net);
+		inet_pton(AF_INET, net, &in_netaddr);
+		host_length = sizeof(in_addr_t)*8 - net_length;
+		i = 1;
+		j = (~in_netaddr)>>net_length;
+	        while(i<j) {
+       		        t = (IPLinkedList)malloc(sizeof(IPNode));
+	                t->next = NULL;
+			t->data = (in_addr_t)((i<<net_length) | in_netaddr);
+               		if(head == NULL) {
+				head = t;
+				r = head;
+	                } else {
+				r->next = t;
+				r = r->next;
+                	}
+       	        	i++;
+	               	(*dstip_cnt)++;
+        	}
+		tok = strtok(NULL, ";");
+	}
+	free(c);
+	return head;
+}
+
 IPLinkedList enumerate_ip(char* device, int* dstip_cnt)
 {
 	int sockfd;
@@ -723,6 +777,8 @@ struct config* load_config(const char* config_file) {
 	}
 	pointer_config->device = NULL;
 	pointer_config->logfile = NULL;
+	pointer_config->dstnet = NULL;
+
 	while (fgets(buffer, FILE_LINE_BUFFER_SIZE, file_handler) != NULL) {
 		if (buffer[0] == '#' || isspace(buffer[0])) {
 			continue;
@@ -765,6 +821,11 @@ struct config* load_config(const char* config_file) {
 		case CONFIG_LOGLEVEL:
 			pointer_config->loglevel = switch_log_level(value);
 			config_flag |= CONFIG_LOGLEVEL;
+			break;
+		case CONFIG_DSTNET:
+			pointer_config->dstnet = (char*) malloc(sizeof(char) * (1 + strlen(value)));
+			strcpy(pointer_config->dstnet, value);
+			config_flag |= CONFIG_DSTNET;
 			break;
 		default:
 			break;
@@ -860,6 +921,7 @@ int main(int argc, char* argv[]) {
 	u_int8_t broadcast_mac_addr[MAC_ADDRESS_LENGTH] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
 	char *functionname = "main";
 	struct config* pointer_config = NULL;
+	IPLinkedList head = NULL;
 
 	/* check sudo previlege */
 	if(geteuid() != getpwnam("root")->pw_uid) {
@@ -907,7 +969,12 @@ int main(int argc, char* argv[]) {
 		}
 	} */
 
-	IPLinkedList head = enumerate_ip(pointer_config->device, &dstip_cnt);
+	if(pointer_config->dstnet == NULL) {
+		head = enumerate_ip(pointer_config->device, &dstip_cnt);
+	} else {
+		head = enumerate_dstnet_ip(pointer_config->dstnet, &dstip_cnt);
+	}
+
 	int threadCount = dstip_cnt / pointer_config->ip_qty_thread;
 	threadCount = threadCount==0?1:threadCount;
 	u_int8_t *payload = NULL;
