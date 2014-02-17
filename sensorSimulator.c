@@ -649,6 +649,7 @@ int main(int argc, char* argv[]) {
 	int srcmac_cnt;
 	int i = 0;
 	char log_buf[FILE_LINE_BUFFER_SIZE];
+	char error_buf[100];
 	char *functionname = "main";
 	struct config* pointer_config = NULL;
 
@@ -736,8 +737,15 @@ int main(int argc, char* argv[]) {
 /*
 		(input+i)->srcmac = copymaclist(head);
 */
-		pthread_create(&tid[i], NULL, thread_routine, (void*)(input+i));
-		thread_sleep(pointer_config->interval);
+		int ret = pthread_create(&tid[i], NULL, thread_routine, (void*)(input+i));
+		if(ret != 0) {
+			sprintf(log_buf, "The %dth thread creation fails, error code is %d. Reason is : %s\n", i, ret, strerror_r(ret, error_buf, 100));
+			debug_log(SEVERE, functionname, log_buf);
+			sprintf(log_buf, "The %dth thread creation fails, error code is %d. Reason is ", i, ret);
+			perror(log_buf);
+			debug_log(SEVERE, functionname, "Program exiting...");
+		}
+//		thread_sleep(pointer_config->interval);
 	}
 
 	/* Wait all worker thread to complete tasks */

@@ -58,3 +58,6 @@ One thing to highlighted here is about the tx power parameter in the configurati
 	milli_watt = 10^(dB_value/10)
 
 The tool uses milli-watt as unit because it has better resolution than decibel, although it's hardware's matter how to handle it eventually.
+
+Another thing is about high volume usage. In the development, it's noticed that the process stack is a limit to create enough threads, i.e. 1000 threads. Therefore, if you are noted with the following message, try with command "ulimit -s unlimit" and then rerun the program to see any luck.
+	The 995th thread creation fails, error code is 11. Reason is : Cannot allocate memory
